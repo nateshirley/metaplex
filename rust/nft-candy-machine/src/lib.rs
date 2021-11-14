@@ -32,6 +32,7 @@ pub mod nft_candy_machine {
         let config = &ctx.accounts.config;
         let clock = &ctx.accounts.clock;
 
+        //checking if the launch is active
         match candy_machine.data.go_live_date {
             None => {
                 if *ctx.accounts.payer.key != candy_machine.authority {
@@ -47,10 +48,12 @@ pub mod nft_candy_machine {
             }
         }
 
+        //check if there are items available
         if candy_machine.items_redeemed >= candy_machine.data.items_available {
             return Err(ErrorCode::CandyMachineEmpty.into());
         }
 
+        //this is the situation where you are using a presale token (from the auction/lottery thing) to mint the nft
         if let Some(mint) = candy_machine.token_mint {
             let token_account_info = &ctx.remaining_accounts[0];
             let transfer_authority_info = &ctx.remaining_accounts[1];
@@ -74,7 +77,7 @@ pub mod nft_candy_machine {
                 token_program: ctx.accounts.token_program.clone(),
                 amount: candy_machine.data.price,
             })?;
-        } else {
+        } else { //and this is the situation where you are just charging sol for the candy machine mint
             if ctx.accounts.payer.lamports() < candy_machine.data.price {
                 return Err(ErrorCode::NotEnoughSOL.into());
             }
@@ -93,6 +96,7 @@ pub mod nft_candy_machine {
             )?;
         }
 
+        //taking the config 
         let config_line = get_config_line(
             &config.to_account_info(),
             candy_machine.items_redeemed as usize,
@@ -104,6 +108,7 @@ pub mod nft_candy_machine {
             .ok_or(ErrorCode::NumericalOverflowError)?;
 
         let config_key = config.key();
+        //setting up the seeds to sign the mint
         let authority_seeds = [
             PREFIX.as_bytes(),
             config_key.as_ref(),
@@ -151,26 +156,41 @@ pub mod nft_candy_machine {
             candy_machine.to_account_info().clone(),
         ];
 
+        //this would be an example of cpi from a non-anchor program to an anchor program
         invoke_signed(
             &create_metadata_accounts(
+                // program_id: Pubkey,
                 *ctx.accounts.token_metadata_program.key,
+                // metadata_account: Pubkey,
                 *ctx.accounts.metadata.key,
+                // mint: Pubkey,
                 *ctx.accounts.mint.key,
+                // mint_authority: Pubkey,
                 *ctx.accounts.mint_authority.key,
+                // payer: Pubkey,
                 *ctx.accounts.payer.key,
+                // update_authority: Pubkey,
                 candy_machine.key(),
+                 // name: String,
                 config_line.name,
+                 // symbol: String,
                 config.data.symbol.clone(),
+                // uri: String,
                 config_line.uri,
+                // creators: Option<Vec<Creator>>,
                 Some(creators),
+                // seller_fee_basis_points: u16,
                 config.data.seller_fee_basis_points,
+                // update_authority_is_signer: bool,
                 false,
+                // is_mutable: bool,
                 config.data.is_mutable,
             ),
             metadata_infos.as_slice(),
             &[&authority_seeds],
         )?;
 
+        //im not sure why it's calling create master edition --- oh buddy you're in for a treat
         invoke_signed(
             &create_master_edition(
                 *ctx.accounts.token_metadata_program.key,
@@ -191,14 +211,20 @@ pub mod nft_candy_machine {
         if !ctx.accounts.config.data.retain_authority {
             new_update_authority = Some(ctx.accounts.update_authority.key());
         }
-
+        
         invoke_signed(
             &update_metadata_accounts(
+                // program_id: Pubkey,
                 *ctx.accounts.token_metadata_program.key,
+                // metadata_account: Pubkey,
                 *ctx.accounts.metadata.key,
+                // update_authority: Pubkey,
                 candy_machine.key(),
+                // new_update_authority: Option<Pubkey>,
                 new_update_authority,
+                // data: Option<Data>,
                 None,
+                // primary_sale_happened: Option<bool>,
                 Some(true),
             ),
             &[
